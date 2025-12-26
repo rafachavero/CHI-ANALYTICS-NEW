@@ -1,0 +1,13 @@
+# Local development
+.antigravity/
+.system_generated/
+.DS_Store
+Thumbs.db
+*.log
+team_page.txt
+team_page.html
+
+# Node (in case you add it later)
+node_modules/
+dist/
+.env

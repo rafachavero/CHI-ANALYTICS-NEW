@@ -1,0 +1,31 @@
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #101922;
+}
+::-webkit-scrollbar-thumb {
+    background: #233648;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #324d67;
+}
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.filled-icon {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.goal-grid-cell {
+    transition: all 0.2s ease;
+}
+.goal-grid-cell:hover {
+    filter: brightness(1.2);
+    cursor: pointer;
+}

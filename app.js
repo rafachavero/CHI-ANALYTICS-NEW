@@ -2,7 +2,220 @@ const { useState, useEffect } = React;
 const { createRoot } = ReactDOM;
 const { MemoryRouter, Routes, Route, Link, useNavigate, useLocation } = ReactRouterDOM;
 
+// --- Firebase Configuration ---
+const firebaseConfig = {
+    apiKey: "AIzaSyD3_ySeudMfXeO3lrJRIPvnqGgyMr8FVf8",
+    authDomain: "chi-analytics-5336b.firebaseapp.com",
+    projectId: "chi-analytics-5336b",
+    storageBucket: "chi-analytics-5336b.firebasestorage.app",
+    messagingSenderId: "900231721396",
+    appId: "1:900231721396:web:04171620f970602a4842e1",
+    measurementId: "G-H6H95H6TT3"
+};
+
+// Initialize Firebase (Compat)
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
 // --- Hooks ---
+
+const useFirestore = (collectionName, docId, initialValue) => {
+    const [data, setData] = useState(initialValue);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const docRef = db.collection(collectionName).doc(docId);
+
+        // Initial fetch and subscription
+        const unsubscribe = docRef.onSnapshot((doc) => {
+            if (doc.exists) {
+                setData(doc.data().content);
+            } else {
+                // If doc doesn't exist, try to migrate from local storage
+                const legacyKey = collectionName === 'events' ? 'chi_analytics_match_events' : `chi_analytics_${collectionName}`;
+                const localData = window.localStorage.getItem(legacyKey);
+                if (localData) {
+                    const parsed = JSON.parse(localData);
+                    docRef.set({ content: parsed });
+                    setData(parsed);
+                } else {
+                    docRef.set({ content: initialValue });
+                }
+            }
+            setLoading(false);
+        }, (error) => {
+            console.error("Firestore Error:", error);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [collectionName, docId]);
+
+    const updateData = async (newData) => {
+        const valueToStore = newData instanceof Function ? newData(data) : newData;
+        setData(valueToStore);
+        try {
+            await db.collection(collectionName).doc(docId).set({ content: valueToStore });
+            // Keep local storage as backup
+            window.localStorage.setItem(`chi_analytics_${collectionName}`, JSON.stringify(valueToStore));
+        } catch (error) {
+            console.error("Error updating Firestore:", error);
+        }
+    };
+
+    return [data, updateData, loading];
+};
+
+// --- New League-Based Hooks ---
+
+const useLeague = (leagueId) => {
+    const [league, setLeague] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!leagueId) {
+            setLoading(false);
+            return;
+        }
+
+        const leagueRef = db.collection('leagues').doc(leagueId);
+        const unsubscribe = leagueRef.onSnapshot((doc) => {
+            if (doc.exists) {
+                setLeague({ id: doc.id, ...doc.data() });
+            } else {
+                // Create default league
+                const defaultLeague = {
+                    name: "Mi Liga",
+                    season: "2024-2025",
+                    teamIds: []
+                };
+                leagueRef.set(defaultLeague);
+                setLeague({ id: leagueId, ...defaultLeague });
+            }
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [leagueId]);
+
+    const updateLeague = async (updates) => {
+        if (!leagueId) return;
+        try {
+            await db.collection('leagues').doc(leagueId).update(updates);
+        } catch (error) {
+            console.error("Error updating league:", error);
+        }
+    };
+
+    return [league, updateLeague, loading];
+};
+
+const useTeams = (leagueId) => {
+    const [teams, setTeams] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!leagueId) {
+            setLoading(false);
+            return;
+        }
+
+        const teamsRef = db.collection('leagues').doc(leagueId).collection('teams');
+        const unsubscribe = teamsRef.onSnapshot((snapshot) => {
+            const teamsData = [];
+            snapshot.forEach((doc) => {
+                teamsData.push({ id: doc.id, ...doc.data() });
+            });
+            setTeams(teamsData);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [leagueId]);
+
+    const addTeam = async (teamData) => {
+        if (!leagueId) return;
+        try {
+            const teamRef = await db.collection('leagues').doc(leagueId).collection('teams').add({
+                ...teamData,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return teamRef.id;
+        } catch (error) {
+            console.error("Error adding team:", error);
+        }
+    };
+
+    const updateTeam = async (teamId, updates) => {
+        if (!leagueId) return;
+        try {
+            await db.collection('leagues').doc(leagueId).collection('teams').doc(teamId).update(updates);
+        } catch (error) {
+            console.error("Error updating team:", error);
+        }
+    };
+
+    const deleteTeam = async (teamId) => {
+        if (!leagueId) return;
+        try {
+            await db.collection('leagues').doc(leagueId).collection('teams').doc(teamId).delete();
+        } catch (error) {
+            console.error("Error deleting team:", error);
+        }
+    };
+
+    return [teams, { addTeam, updateTeam, deleteTeam }, loading];
+};
+
+const useMatches = (leagueId) => {
+    const [matches, setMatches] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (!leagueId) {
+            setLoading(false);
+            return;
+        }
+
+        const matchesRef = db.collection('leagues').doc(leagueId).collection('matches')
+            .orderBy('date', 'desc');
+
+        const unsubscribe = matchesRef.onSnapshot((snapshot) => {
+            const matchesData = [];
+            snapshot.forEach((doc) => {
+                matchesData.push({ id: doc.id, ...doc.data() });
+            });
+            setMatches(matchesData);
+            setLoading(false);
+        });
+
+        return () => unsubscribe();
+    }, [leagueId]);
+
+    const addMatch = async (matchData) => {
+        if (!leagueId) return;
+        try {
+            const matchRef = await db.collection('leagues').doc(leagueId).collection('matches').add({
+                ...matchData,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            return matchRef.id;
+        } catch (error) {
+            console.error("Error adding match:", error);
+        }
+    };
+
+    const updateMatch = async (matchId, updates) => {
+        if (!leagueId) return;
+        try {
+            await db.collection('leagues').doc(leagueId).collection('matches').doc(matchId).update(updates);
+        } catch (error) {
+            console.error("Error updating match:", error);
+        }
+    };
+
+    return [matches, { addMatch, updateMatch }, loading];
+};
 
 const useLocalStorage = (key, initialValue) => {
     const [storedValue, setStoredValue] = useState(() => {
@@ -47,7 +260,7 @@ const NavButton = ({ to, label, icon }) => {
     );
 };
 
-const MainSidebar = () => (
+const MainSidebar = ({ onOpenLeagueManager }) => (
     <aside className="w-20 lg:w-64 flex-shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between sticky top-0 h-screen overflow-y-auto transition-all duration-300 z-20">
         <div className="flex flex-col gap-6 p-4">
             <div className="flex items-center gap-3 px-2">
@@ -67,6 +280,19 @@ const MainSidebar = () => (
                 <NavButton to="/integrations" label="Insights IA" icon="psychology" />
                 <NavButton to="/scouting" label="Scouting" icon="smart_display" />
             </nav>
+
+            {/* League Manager Button */}
+            {onOpenLeagueManager && (
+                <div className="pt-4 border-t border-white/5">
+                    <button
+                        onClick={onOpenLeagueManager}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-gradient-to-r from-primary/20 to-purple-500/20 hover:from-primary/30 hover:to-purple-500/30 text-white border border-primary/30 hover:border-primary/50"
+                    >
+                        <span className="material-symbols-outlined text-[24px]">workspace_premium</span>
+                        <span className="hidden lg:block text-sm font-bold leading-normal">GESTOR DE LLIGA</span>
+                    </button>
+                </div>
+            )}
         </div>
         <div className="p-4">
             <NavButton to="/admin" label="Configuració" icon="settings" />
@@ -393,6 +619,252 @@ const TeamManager = ({ teams, onUpdateTeams, onClose }) => {
     );
 };
 
+const LeagueManager = ({ leagueId, onClose }) => {
+    const [league, updateLeague, loadingLeague] = useLeague(leagueId);
+    const [teams, teamActions, loadingTeams] = useTeams(leagueId);
+    const [activeTab, setActiveTab] = useState('teams');
+    const [importUrl, setImportUrl] = useState('');
+    const [isImporting, setIsImporting] = useState(false);
+    const [importError, setImportError] = useState(null);
+
+    const handleImportFromClassification = async () => {
+        if (!importUrl) return;
+        setIsImporting(true);
+        setImportError(null);
+
+        try {
+            const html = await fetchHtmlSafe(importUrl);
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+
+            // Extract teams from classification table
+            const rows = Array.from(doc.querySelectorAll('table tbody tr'));
+            const detectedTeams = [];
+
+            for (const row of rows) {
+                const teamLink = row.querySelector('a[href*="id_equipo"]');
+                if (teamLink) {
+                    const teamName = teamLink.innerText.trim();
+                    const teamUrl = teamLink.href;
+                    const teamIdMatch = teamUrl.match(/id_equipo=(\d+)/);
+
+                    if (teamIdMatch) {
+                        detectedTeams.push({
+                            name: teamName,
+                            externalId: teamIdMatch[1],
+                            url: teamUrl,
+                            players: [],
+                            isMyTeam: false
+                        });
+                    }
+                }
+            }
+
+            // Import all detected teams
+            for (const team of detectedTeams) {
+                await teamActions.addTeam(team);
+            }
+
+            setImportUrl('');
+            alert(`✅ ${detectedTeams.length} equipos importados correctamente`);
+        } catch (error) {
+            setImportError(error.message);
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const markAsMyTeam = async (teamId) => {
+        // Unmark all other teams
+        for (const team of teams) {
+            if (team.isMyTeam && team.id !== teamId) {
+                await teamActions.updateTeam(team.id, { isMyTeam: false });
+            }
+        }
+        // Mark selected team
+        await teamActions.updateTeam(teamId, { isMyTeam: true });
+    };
+
+    if (loadingLeague || loadingTeams) {
+        return (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-primary font-bold">CARREGANT LLIGA...</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 text-white">
+            <div className="bg-surface-dark border border-border-dark w-full max-w-6xl h-[90vh] rounded-2xl shadow-2xl flex flex-col">
+                {/* Header */}
+                <div className="p-6 border-b border-white/5 flex justify-between items-center bg-background-dark/50 rounded-t-2xl">
+                    <div>
+                        <h2 className="text-2xl font-bold flex items-center gap-2">
+                            <span className="material-symbols-outlined text-primary">emoji_events</span>
+                            Gestor de Lliga
+                        </h2>
+                        <p className="text-sm text-text-secondary mt-1">{league?.name || 'Mi Liga'} • {league?.season || '2024-2025'}</p>
+                    </div>
+                    <button onClick={onClose} className="text-text-secondary hover:text-white transition-colors">
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+
+                {/* Tabs */}
+                <div className="flex gap-2 px-6 pt-4 border-b border-white/5">
+                    <button
+                        onClick={() => setActiveTab('teams')}
+                        className={`px-4 py-2 rounded-t-lg font-bold text-sm transition-all ${activeTab === 'teams'
+                            ? 'bg-primary text-white'
+                            : 'bg-white/5 text-text-secondary hover:bg-white/10'
+                            }`}
+                    >
+                        EQUIPS ({teams.length})
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('import')}
+                        className={`px-4 py-2 rounded-t-lg font-bold text-sm transition-all ${activeTab === 'import'
+                            ? 'bg-primary text-white'
+                            : 'bg-white/5 text-text-secondary hover:bg-white/10'
+                            }`}
+                    >
+                        IMPORTAR
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('settings')}
+                        className={`px-4 py-2 rounded-t-lg font-bold text-sm transition-all ${activeTab === 'settings'
+                            ? 'bg-primary text-white'
+                            : 'bg-white/5 text-text-secondary hover:bg-white/10'
+                            }`}
+                    >
+                        CONFIGURACIÓ
+                    </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-6">
+                    {activeTab === 'teams' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {teams.map(team => (
+                                <div key={team.id} className="p-4 rounded-xl bg-background-dark/50 border border-white/5 hover:border-primary/30 transition-all">
+                                    <div className="flex items-start justify-between mb-3">
+                                        <h3 className="font-bold text-white flex-1">{team.name}</h3>
+                                        {team.isMyTeam && (
+                                            <span className="px-2 py-1 bg-primary/20 text-primary text-xs font-bold rounded">
+                                                MEU EQUIP
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-text-secondary mb-3">
+                                        {team.players?.length || 0} jugadors
+                                    </p>
+                                    <div className="flex gap-2">
+                                        {!team.isMyTeam && (
+                                            <button
+                                                onClick={() => markAsMyTeam(team.id)}
+                                                className="flex-1 bg-white/5 hover:bg-primary/20 text-white text-xs font-bold py-2 rounded-lg transition-all"
+                                            >
+                                                MARCAR COM A MEU
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => teamActions.deleteTeam(team.id)}
+                                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold px-3 py-2 rounded-lg transition-all"
+                                        >
+                                            <span className="material-symbols-outlined text-sm">delete</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            {teams.length === 0 && (
+                                <div className="col-span-full py-20 text-center bg-background-dark/20 rounded-2xl border-2 border-dashed border-white/5">
+                                    <span className="material-symbols-outlined text-4xl opacity-10 mb-2">groups</span>
+                                    <p className="text-sm text-text-secondary">No hi ha equips. Importa'ls des de la pestanya IMPORTAR.</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {activeTab === 'import' && (
+                        <div className="max-w-2xl mx-auto space-y-6">
+                            <div className="p-6 rounded-xl bg-background-dark/50 border border-white/5">
+                                <h3 className="font-bold text-lg mb-4">Importació Massiva des d'ISquad</h3>
+                                <p className="text-sm text-text-secondary mb-4">
+                                    Enganxa l'URL d'una classificació d'ISquad per importar tots els equips automàticament.
+                                </p>
+                                <input
+                                    type="text"
+                                    placeholder="https://resultadosbalonmano.isquad.es/clasificacion.php?id=..."
+                                    className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50 mb-4"
+                                    value={importUrl}
+                                    onChange={(e) => setImportUrl(e.target.value)}
+                                />
+                                {importError && (
+                                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm mb-4">
+                                        {importError}
+                                    </div>
+                                )}
+                                <button
+                                    onClick={handleImportFromClassification}
+                                    disabled={isImporting || !importUrl}
+                                    className="w-full bg-primary hover:bg-primary/90 disabled:bg-white/5 disabled:text-text-secondary text-white font-bold py-3 rounded-xl transition-all"
+                                >
+                                    {isImporting ? 'IMPORTANT...' : 'IMPORTAR EQUIPS'}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'settings' && (
+                        <div className="max-w-2xl mx-auto space-y-6">
+                            <div className="p-6 rounded-xl bg-background-dark/50 border border-white/5">
+                                <h3 className="font-bold text-lg mb-4">Configuració de la Lliga</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs font-bold text-text-secondary uppercase tracking-widest block mb-2">
+                                            Nom de la Lliga
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                                            value={league?.name || ''}
+                                            onChange={(e) => updateLeague({ name: e.target.value })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs font-bold text-text-secondary uppercase tracking-widest block mb-2">
+                                            Temporada
+                                        </label>
+                                        <input
+                                            type="text"
+                                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/50"
+                                            value={league?.season || ''}
+                                            onChange={(e) => updateLeague({ season: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {/* Footer */}
+                <div className="p-6 border-t border-white/5 flex justify-end bg-background-dark/30 rounded-b-2xl">
+                    <button
+                        onClick={onClose}
+                        className="bg-white/5 hover:bg-white/10 text-white font-bold px-8 py-2.5 rounded-xl transition-all border border-white/10"
+                    >
+                        TANCAR
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const PlayerEditor = ({ player, onSave, onClose }) => {
     const [name, setName] = useState(player.name);
     const [number, setNumber] = useState(player.number);
@@ -535,10 +1007,10 @@ const LandingPage = () => {
     );
 };
 
-const DashboardPage = ({ players }) => {
+const DashboardPage = ({ players, onOpenLeagueManager }) => {
     return (
         <div className="flex min-h-screen w-full">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 <header className="h-20 border-b border-border-dark bg-background-dark/80 backdrop-blur-md sticky top-0 z-10 px-6 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-6">
@@ -709,7 +1181,7 @@ const DashboardPage = ({ players }) => {
     );
 };
 
-const PlayerProfilePage = ({ players, onUpdatePlayers, onShowManager }) => {
+const PlayerProfilePage = ({ players, onUpdatePlayers, onShowManager, onOpenLeagueManager }) => {
     const [editingPlayer, setEditingPlayer] = useState(null);
 
     const handleSavePlayer = (updatedPlayer) => {
@@ -720,7 +1192,7 @@ const PlayerProfilePage = ({ players, onUpdatePlayers, onShowManager }) => {
 
     return (
         <div className="flex min-h-screen w-full">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col min-w-0 bg-background-dark overflow-y-auto">
                 <header className="flex items-center justify-between whitespace-nowrap py-3 px-6 lg:px-12 border-b border-border-dark bg-surface-dark">
                     <div className="flex items-center gap-4 text-white">
@@ -804,10 +1276,10 @@ const PlayerProfilePage = ({ players, onUpdatePlayers, onShowManager }) => {
     )
 }
 
-const MatchAnalysisPage = () => {
+const MatchAnalysisPage = ({ onOpenLeagueManager }) => {
     return (
         <div className="flex min-h-screen w-full bg-background-dark text-white font-display overflow-x-hidden">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col">
                 <div className="px-6 md:px-10 lg:px-20 py-5">
                     <div className="flex flex-wrap justify-between items-end gap-3 p-4 border-b border-surface-dark-light/50 pb-6 mb-4">
@@ -871,10 +1343,10 @@ const MatchAnalysisPage = () => {
     )
 }
 
-const AdminPage = () => {
+const AdminPage = ({ onOpenLeagueManager }) => {
     return (
         <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col p-8">
                 <div className="flex flex-col gap-2 mb-8">
                     <h1 className="text-white text-3xl md:text-4xl font-bold tracking-tight">Gestió d'Usuaris i Rols</h1>
@@ -911,10 +1383,10 @@ const AdminPage = () => {
     )
 }
 
-const IntegrationsPage = () => {
+const IntegrationsPage = ({ onOpenLeagueManager }) => {
     return (
         <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col p-8">
                 <h1 className="text-3xl font-black leading-tight tracking-[-0.033em] text-white mb-6">Centre d'Integració</h1>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -954,18 +1426,18 @@ const IntegrationsPage = () => {
     )
 }
 
-const ScoutingPage = ({ teams, events, onUpdateEvents }) => {
+const ScoutingPage = ({ teams, events, onUpdateEvents, onOpenLeagueManager }) => {
     const [selectedTeam, setSelectedTeam] = useState('myTeam');
     const [selectedPlayer, setSelectedPlayer] = useState(null);
     const [matchTime, setMatchTime] = useState(0);
 
     const eventTypes = [
         { id: 'GOAL', label: 'GOL', icon: 'sports_handball', color: 'bg-green-500' },
-        { id: 'MISS', label: 'FALL', icon: 'close', color: 'bg-red-400' },
-        { id: 'SAVE', label: 'PARADA', icon: 'front_hand', color: 'bg-blue-400' },
-        { id: 'TURNOVER', label: 'PÈRDUA', icon: 'error', color: 'bg-orange-400' },
-        { id: 'STEAL', label: 'RECUPERA', icon: 'get_app', color: 'bg-emerald-400' },
-        { id: 'SUSPENSION', label: '2 MIN', icon: 'timer_10_alt_1', color: 'bg-yellow-400' },
+        { id: 'MISS', label: 'FALLO', icon: 'close', color: 'bg-orange-500' },
+        { id: 'SAVE', label: 'PARADA', icon: 'block', color: 'bg-blue-500' },
+        { id: 'TURNOVER', label: 'PÉRDIDA', icon: 'warning', color: 'bg-red-500' },
+        { id: 'STEAL', label: 'RECUPERACIÓ', icon: 'verified', color: 'bg-purple-500' },
+        { id: 'PENALTY', label: '2 MIN', icon: 'schedule', color: 'bg-yellow-500' },
     ];
 
     const currentPlayers = teams[selectedTeam] || [];
@@ -986,13 +1458,13 @@ const ScoutingPage = ({ teams, events, onUpdateEvents }) => {
         setSelectedPlayer(null); // Reset after action
     };
 
-    const deleteEvent = (id) => {
-        onUpdateEvents(events.filter(e => e.id !== id));
+    const deleteEvent = (eventId) => {
+        onUpdateEvents(events.filter(e => e.id !== eventId));
     };
 
     return (
         <div className="flex h-screen w-full bg-background-dark font-display text-white overflow-hidden">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col min-w-0">
                 <header className="flex items-center justify-between border-b border-border-dark px-6 py-4 bg-surface-dark shrink-0">
                     <div className="flex items-center gap-4">
@@ -1134,13 +1606,13 @@ const ScoutingPage = ({ teams, events, onUpdateEvents }) => {
     );
 };
 
-const TeamsPage = ({ teams }) => {
+const TeamsPage = ({ teams, onOpenLeagueManager }) => {
     const myTeam = teams?.myTeam || [];
     const rivalTeam = teams?.rivalTeam || [];
 
     return (
         <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
-            <MainSidebar />
+            <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col p-8 overflow-y-auto">
                 <h1 className="text-3xl md:text-4xl font-black font-display leading-tight tracking-[-0.033em] mb-6 uppercase">Cara a Cara</h1>
 
@@ -1212,27 +1684,52 @@ const TeamsPage = ({ teams }) => {
 }
 
 const App = () => {
-    const [teams, setTeams] = useLocalStorage('chi_analytics_teams', { myTeam: [], rivalTeam: [] });
-    const [events, setEvents] = useLocalStorage('chi_analytics_match_events', []);
+    // Generate or retrieve a persistent session ID for this device
+    const [sessionId] = useLocalStorage('chi_analytics_session_id', 'user_' + Math.random().toString(36).substr(2, 9));
+
+    // Legacy system (still active for backward compatibility)
+    const [teams, setTeams, loadingTeams] = useFirestore('teams', sessionId, { myTeam: [], rivalTeam: [] });
+    const [events, setEvents, loadingEvents] = useFirestore('events', sessionId, []);
     const [showManager, setShowManager] = useState(false);
+
+    // New league system
+    const [showLeagueManager, setShowLeagueManager] = useState(false);
+    const leagueId = sessionId; // Use same ID for now
+
+    if (loadingTeams || loadingEvents) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-background-dark text-white">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-primary font-bold animate-pulse">SINCRONITZANT AMB EL NÚVOL...</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <MemoryRouter>
             <Routes>
                 <Route path="/" element={<LandingPage />} />
-                <Route path="/dashboard" element={<DashboardPage players={teams.myTeam} />} />
-                <Route path="/player" element={<PlayerProfilePage players={teams.myTeam} onUpdatePlayers={(updated) => setTeams({ ...teams, myTeam: updated })} onShowManager={() => setShowManager(true)} />} />
-                <Route path="/match-analysis" element={<MatchAnalysisPage />} />
-                <Route path="/teams" element={<TeamsPage teams={teams} />} />
-                <Route path="/integrations" element={<IntegrationsPage />} />
-                <Route path="/scouting" element={<ScoutingPage teams={teams} events={events} onUpdateEvents={setEvents} />} />
-                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/dashboard" element={<DashboardPage players={teams.myTeam} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/player" element={<PlayerProfilePage players={teams.myTeam} onUpdatePlayers={(updated) => setTeams({ ...teams, myTeam: updated })} onShowManager={() => setShowManager(true)} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/match-analysis" element={<MatchAnalysisPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/teams" element={<TeamsPage teams={teams} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/integrations" element={<IntegrationsPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/scouting" element={<ScoutingPage teams={teams} events={events} onUpdateEvents={setEvents} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
+                <Route path="/admin" element={<AdminPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
             </Routes>
             {showManager && (
                 <TeamManager
                     teams={teams}
                     onUpdateTeams={setTeams}
                     onClose={() => setShowManager(false)}
+                />
+            )}
+            {showLeagueManager && (
+                <LeagueManager
+                    leagueId={leagueId}
+                    onClose={() => setShowLeagueManager(false)}
                 />
             )}
         </MemoryRouter>

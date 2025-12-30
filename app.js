@@ -637,6 +637,25 @@ const LeagueManager = ({ leagueId, onClose }) => {
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
 
+            // Extract phase/group information from page title
+            const pageTitle = doc.querySelector('h4, .competition-title, h3');
+            let phaseName = 'General';
+            let groupName = null;
+
+            if (pageTitle) {
+                const titleText = pageTitle.innerText.trim();
+                // Example: "LLIGA CATALANA OR SÈNIOR MASCULINA - PRIMERA FASE - B"
+                const phaseMatch = titleText.match(/PRIMERA FASE|SEGUNDA FASE|FASE \d+/i);
+                const groupMatch = titleText.match(/- ([AB])\s*$/i);
+
+                if (phaseMatch) {
+                    phaseName = phaseMatch[0];
+                }
+                if (groupMatch) {
+                    groupName = `Grup ${groupMatch[1].toUpperCase()}`;
+                }
+            }
+
             // Extract teams from classification table
             const rows = Array.from(doc.querySelectorAll('table tbody tr'));
             const detectedTeams = [];
@@ -654,7 +673,9 @@ const LeagueManager = ({ leagueId, onClose }) => {
                             externalId: teamIdMatch[1],
                             url: teamUrl,
                             players: [],
-                            isMyTeam: false
+                            isMyTeam: false,
+                            phase: phaseName,
+                            group: groupName
                         });
                     }
                 }
@@ -751,7 +772,23 @@ const LeagueManager = ({ leagueId, onClose }) => {
                             {teams.map(team => (
                                 <div key={team.id} className="p-4 rounded-xl bg-background-dark/50 border border-white/5 hover:border-primary/30 transition-all">
                                     <div className="flex items-start justify-between mb-3">
-                                        <h3 className="font-bold text-white flex-1">{team.name}</h3>
+                                        <div className="flex-1">
+                                            <h3 className="font-bold text-white mb-1">{team.name}</h3>
+                                            {(team.phase || team.group) && (
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {team.phase && (
+                                                        <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 text-xs font-bold rounded border border-purple-500/20">
+                                                            {team.phase}
+                                                        </span>
+                                                    )}
+                                                    {team.group && (
+                                                        <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-xs font-bold rounded border border-blue-500/20">
+                                                            {team.group}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                         {team.isMyTeam && (
                                             <span className="px-2 py-1 bg-primary/20 text-primary text-xs font-bold rounded">
                                                 MEU EQUIP

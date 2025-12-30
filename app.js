@@ -241,6 +241,267 @@ const useLocalStorage = (key, initialValue) => {
     return [storedValue, setValue];
 };
 
+// --- Authentication Context ---
+
+const AuthContext = React.createContext();
+
+const useAuth = () => useContext(AuthContext);
+
+const AuthProvider = ({ children }) => {
+    const [currentUser, setCurrentUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [userRole, setUserRole] = useState(null); // 'admin' or 'user'
+
+    useEffect(() => {
+        const unsubscribe = firebase.auth().onAuthStateChanged(async (user) => {
+            setCurrentUser(user);
+
+            if (user) {
+                // Get user role from Firestore
+                try {
+                    const userDoc = await db.collection('users').doc(user.uid).get();
+                    if (userDoc.exists) {
+                        setUserRole(userDoc.data().role);
+                    } else {
+                        // Create default profile for new google/other signups if we were to adding them
+                        // For email/pass, we handle creation in SignupPage
+                        setUserRole('user');
+                    }
+                } catch (error) {
+                    console.error("Error fetching user role:", error);
+                    setUserRole('user');
+                }
+            } else {
+                setUserRole(null);
+            }
+
+            setLoading(false);
+        });
+
+        return unsubscribe;
+    }, []);
+
+    const signup = (email, password) => {
+        return firebase.auth().createUserWithEmailAndPassword(email, password);
+    };
+
+    const login = (email, password) => {
+        return firebase.auth().signInWithEmailAndPassword(email, password);
+    };
+
+    const logout = () => {
+        return firebase.auth().signOut();
+    };
+
+    const value = {
+        currentUser,
+        userRole,
+        signup,
+        login,
+        logout
+    };
+
+    return (
+        <AuthContext.Provider value={value}>
+            {!loading && children}
+        </AuthContext.Provider>
+    );
+};
+
+// --- Auth Components ---
+
+const LoginPage = () => {
+    const { login } = useAuth();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const navigate = useNavigate();
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        try {
+            setError('');
+            setLoading(true);
+            await login(email, password);
+            navigate('/dashboard');
+        } catch (err) {
+            console.error(err);
+            setError('Error al iniciar sessió. Verifica les teves credencials.');
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="min-h-screen bg-background-dark flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-surface-dark p-8 rounded-2xl border border-border-dark shadow-2xl">
+                <div className="text-center mb-8">
+                    <span className="material-symbols-outlined text-primary text-5xl mb-4">sports_handball</span>
+                    <h2 className="text-2xl font-bold text-white">Benvingut a CHI Analytics</h2>
+                    <p className="text-text-secondary mt-2">Inicia sessió per continuar</p>
+                </div>
+
+                {error && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-sm mb-6 text-center">
+                        {error}
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Email</label>
+                        <input
+                            type="email"
+                            required
+                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Contrasenya</label>
+                        <input
+                            type="password"
+                            required
+                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-all mt-4"
+                    >
+                        {loading ? 'Carregant...' : 'INICIAR SESSIÓ'}
+                    </button>
+                </form>
+
+                <div className="mt-6 text-center text-sm text-text-secondary">
+                    No tens compte?{' '}
+                    <Link to="/signup" className="text-primary hover:text-white font-bold transition-colors">
+                        Registra't aquí
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const SignupPage = () => {
+    const { signup } = useAuth();
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const navigate = useNavigate();
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+
+        if (password !== confirmPassword) {
+            return setError('Les contrasenyes no coincideixen');
+        }
+
+        if (password.length < 6) {
+            return setError('La contrasenya ha de tenir almenys 6 caràcters');
+        }
+
+        try {
+            setError('');
+            setLoading(true);
+            const userCredential = await signup(email, password);
+
+            // Create user profile in Firestore
+            await db.collection('users').doc(userCredential.user.uid).set({
+                email: email,
+                role: 'user', // Default role
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            navigate('/dashboard');
+        } catch (err) {
+            console.error(err);
+            setError('Error al crear el compte: ' + err.message);
+        }
+        setLoading(false);
+    };
+
+    return (
+        <div className="min-h-screen bg-background-dark flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-surface-dark p-8 rounded-2xl border border-border-dark shadow-2xl">
+                <div className="text-center mb-8">
+                    <span className="material-symbols-outlined text-primary text-5xl mb-4">person_add</span>
+                    <h2 className="text-2xl font-bold text-white">Crear Compte</h2>
+                    <p className="text-text-secondary mt-2">Uneix-te a CHI Analytics</p>
+                </div>
+
+                {error && (
+                    <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 rounded-lg text-sm mb-6 text-center">
+                        {error}
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Email</label>
+                        <input
+                            type="email"
+                            required
+                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Contrasenya</label>
+                        <input
+                            type="password"
+                            required
+                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Confirmar Contrasenya</label>
+                        <input
+                            type="password"
+                            required
+                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                    </div>
+                    <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-3.5 rounded-xl transition-all mt-4"
+                    >
+                        {loading ? 'Creant compte...' : 'REGISTRAR-SE'}
+                    </button>
+                </form>
+
+                <div className="mt-6 text-center text-sm text-text-secondary">
+                    Ja tens compte?{' '}
+                    <Link to="/login" className="text-primary hover:text-white font-bold transition-colors">
+                        Inicia sessió
+                    </Link>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const ProtectedRoute = ({ children }) => {
+    const { currentUser } = useAuth();
+    if (!currentUser) {
+        return <Navigate to="/login" />;
+    }
+    return children;
+};
+
 // --- Common Components ---
 
 const NavButton = ({ to, label, icon }) => {
@@ -260,49 +521,75 @@ const NavButton = ({ to, label, icon }) => {
     );
 };
 
-const MainSidebar = ({ onOpenLeagueManager }) => (
-    <aside className="w-20 lg:w-64 flex-shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between sticky top-0 h-screen overflow-y-auto transition-all duration-300 z-20">
-        <div className="flex flex-col gap-6 p-4">
-            <div className="flex items-center gap-3 px-2">
-                <div className="bg-primary/20 p-2 rounded-lg">
-                    <span className="material-symbols-outlined text-primary" style={{ fontSize: '28px' }}>sports_handball</span>
-                </div>
-                <div className="hidden lg:flex flex-col">
-                    <h1 className="text-base text-white font-bold leading-none tracking-wide uppercase">CHI Analytics</h1>
-                    <p className="text-text-secondary text-xs font-normal">Pro Analytics</p>
-                </div>
-            </div>
-            <nav className="flex flex-col gap-2">
-                <NavButton to="/dashboard" label="Lligues" icon="emoji_events" />
-                <NavButton to="/teams" label="Equips" icon="groups" />
-                <NavButton to="/player" label="Jugadors" icon="person" />
-                <NavButton to="/match-analysis" label="Anàlisi Partit" icon="analytics" />
-                <NavButton to="/integrations" label="Insights IA" icon="psychology" />
-                <NavButton to="/scouting" label="Scouting" icon="smart_display" />
-            </nav>
+const MainSidebar = ({ onOpenLeagueManager }) => {
+    const { currentUser, logout } = useAuth();
+    const navigate = useNavigate();
 
-            {/* League Manager Button */}
-            {onOpenLeagueManager && (
-                <div className="pt-4 border-t border-white/5">
-                    <button
-                        onClick={onOpenLeagueManager}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-gradient-to-r from-primary/20 to-purple-500/20 hover:from-primary/30 hover:to-purple-500/30 text-white border border-primary/30 hover:border-primary/50"
-                    >
-                        <span className="material-symbols-outlined text-[24px]">workspace_premium</span>
-                        <span className="hidden lg:block text-sm font-bold leading-normal">GESTOR DE LLIGA</span>
-                    </button>
+    const handleLogout = async (e) => {
+        e.preventDefault();
+        try {
+            await logout();
+            navigate('/login');
+        } catch (error) {
+            console.error("Failed to log out", error);
+        }
+    };
+
+    return (
+        <aside className="w-20 lg:w-64 flex-shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between sticky top-0 h-screen overflow-y-auto transition-all duration-300 z-20">
+            <div className="flex flex-col gap-6 p-4">
+                <div className="flex items-center gap-3 px-2">
+                    <div className="bg-primary/20 p-2 rounded-lg">
+                        <span className="material-symbols-outlined text-primary" style={{ fontSize: '28px' }}>sports_handball</span>
+                    </div>
+                    <div className="hidden lg:flex flex-col">
+                        <h1 className="text-base text-white font-bold leading-none tracking-wide uppercase">CHI Analytics</h1>
+                        <p className="text-text-secondary text-xs font-normal">Pro Analytics</p>
+                    </div>
                 </div>
-            )}
-        </div>
-        <div className="p-4">
-            <NavButton to="/admin" label="Configuració" icon="settings" />
-            <Link to="/" className="flex items-center gap-3 px-3 py-3 mt-2 rounded-lg text-text-secondary hover:bg-surface-dark-light hover:text-white transition-colors">
-                <span className="material-symbols-outlined">logout</span>
-                <span className="hidden lg:block text-sm font-medium">Sortir</span>
-            </Link>
-        </div>
-    </aside>
-);
+                <nav className="flex flex-col gap-2">
+                    <NavButton to="/dashboard" label="Lligues" icon="emoji_events" />
+                    <NavButton to="/teams" label="Equips" icon="groups" />
+                    <NavButton to="/player" label="Jugadors" icon="person" />
+                    <NavButton to="/match-analysis" label="Anàlisi Partit" icon="analytics" />
+                    <NavButton to="/integrations" label="Insights IA" icon="psychology" />
+                    <NavButton to="/scouting" label="Scouting" icon="smart_display" />
+                </nav>
+
+                {/* League Manager Button */}
+                {onOpenLeagueManager && (
+                    <div className="pt-4 border-t border-white/5">
+                        <button
+                            onClick={onOpenLeagueManager}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all bg-gradient-to-r from-primary/20 to-purple-500/20 hover:from-primary/30 hover:to-purple-500/30 text-white border border-primary/30 hover:border-primary/50"
+                        >
+                            <span className="material-symbols-outlined text-[24px]">workspace_premium</span>
+                            <span className="hidden lg:block text-sm font-bold leading-normal">GESTOR DE LLIGA</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+            <div className="p-4">
+                <NavButton to="/admin" label="Configuració" icon="settings" />
+
+                {currentUser && (
+                    <div className="hidden lg:block px-3 py-2 mb-2 text-xs text-text-secondary truncate border-t border-white/5 mt-2 pt-4">
+                        <div className="font-bold text-white">Usuari Connectat</div>
+                        <div className="truncate" title={currentUser.email}>{currentUser.email}</div>
+                    </div>
+                )}
+
+                <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-3 py-3 mt-2 rounded-lg text-text-secondary hover:bg-surface-dark-light hover:text-white transition-colors text-left"
+                >
+                    <span className="material-symbols-outlined">logout</span>
+                    <span className="hidden lg:block text-sm font-medium">Sortir</span>
+                </button>
+            </div>
+        </aside>
+    );
+};
 
 // --- Component: TeamManager (Modal) ---
 
@@ -1381,44 +1668,168 @@ const MatchAnalysisPage = ({ onOpenLeagueManager }) => {
 }
 
 const AdminPage = ({ onOpenLeagueManager }) => {
+    const { currentUser, userRole } = useAuth();
+    const [users, setUsers] = useState([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchUsers = async () => {
+            if (userRole !== 'admin') {
+                setLoading(false);
+                return;
+            }
+            try {
+                const snapshot = await db.collection('users').orderBy('createdAt', 'desc').get();
+                setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            } catch (error) {
+                console.error("Error fetching users:", error);
+            }
+            setLoading(false);
+        };
+
+        fetchUsers();
+    }, [userRole]);
+
+    const toggleRole = async (userId, currentRole) => {
+        if (userId === currentUser.uid) {
+            alert("No pots canviar el teu propi rol.");
+            return;
+        }
+        const newRole = currentRole === 'admin' ? 'user' : 'admin';
+        try {
+            await db.collection('users').doc(userId).update({ role: newRole });
+            setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        } catch (error) {
+            console.error("Error updating role:", error);
+            alert("Error al actualitzar el rol.");
+        }
+    };
+
+    const deleteUser = async (userId) => {
+        if (userId === currentUser.uid) {
+            alert("No pots eliminar el teu propi usuari.");
+            return;
+        }
+        if (!window.confirm("Estàs segur de que vols eliminar aquest usuari? Aquesta acció no es pot desfer.")) {
+            return;
+        }
+        try {
+            await db.collection('users').doc(userId).delete();
+            setUsers(users.filter(u => u.id !== userId));
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            alert("Error al eliminar l'usuari de la base de dades.");
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex min-h-screen w-full bg-background-dark font-display text-white items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-text-secondary">Verificant permisos...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (userRole !== 'admin') {
+        return (
+            <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
+                <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                    <div className="bg-red-500/10 p-6 rounded-full border border-red-500/20 mb-6">
+                        <span className="material-symbols-outlined text-red-500 text-6xl">lock</span>
+                    </div>
+                    <h1 className="text-3xl font-bold mb-2">Accés Restringit</h1>
+                    <p className="text-text-secondary max-w-md">
+                        Aquesta àrea està reservada per a administradors. Contacta amb el suport tècnic si creus que això és un error.
+                    </p>
+                    <p className="mt-4 text-xs text-text-secondary font-mono bg-black/30 px-3 py-1 rounded">
+                        ID: {currentUser?.uid}
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
             <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
-            <div className="flex-1 flex flex-col p-8">
+            <div className="flex-1 flex flex-col p-8 overflow-y-auto">
                 <div className="flex flex-col gap-2 mb-8">
-                    <h1 className="text-white text-3xl md:text-4xl font-bold tracking-tight">Gestió d'Usuaris i Rols</h1>
-                    <p className="text-text-secondary text-base font-light">Administra l'accés multi-inquilí, assigna rols d'equip o selecció.</p>
+                    <h1 className="text-white text-3xl md:text-4xl font-bold tracking-tight">Gestió d'Usuaris</h1>
+                    <p className="text-text-secondary text-base font-light">
+                        Administra els usuaris registrats i els seus permisos d'accés.
+                    </p>
                 </div>
+
                 <div className="overflow-hidden rounded-xl border border-border-dark bg-surface-dark shadow-sm">
                     <table className="w-full text-left text-sm whitespace-nowrap">
                         <thead className="bg-background-dark/50 border-b border-border-dark text-text-secondary font-medium uppercase tracking-wider text-xs">
                             <tr>
                                 <th className="px-6 py-4">Usuari</th>
-                                <th className="px-6 py-4">Rol Assignat</th>
-                                <th className="px-6 py-4">Organització</th>
-                                <th className="px-6 py-4">Estat</th>
+                                <th className="px-6 py-4">Data Registre</th>
+                                <th className="px-6 py-4">Rol</th>
+                                <th className="px-6 py-4 text-right">Accions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border-dark">
-                            <tr className="group hover:bg-background-dark/50 transition-colors">
-                                <td className="px-6 py-4 text-white font-medium">Jordi Ribera</td>
-                                <td className="px-6 py-4"><span className="text-purple-400 bg-purple-500/10 px-2 py-1 rounded-full text-xs">Seleccionador</span></td>
-                                <td className="px-6 py-4 text-text-secondary">RFEBM</td>
-                                <td className="px-6 py-4"><span className="text-green-400 bg-green-500/10 px-2 py-1 rounded text-xs">Actiu</span></td>
-                            </tr>
-                            <tr className="group hover:bg-background-dark/50 transition-colors">
-                                <td className="px-6 py-4 text-white font-medium">Ana García</td>
-                                <td className="px-6 py-4"><span className="text-blue-400 bg-blue-500/10 px-2 py-1 rounded-full text-xs">Analista</span></td>
-                                <td className="px-6 py-4 text-text-secondary">FC Barcelona</td>
-                                <td className="px-6 py-4"><span className="text-green-400 bg-green-500/10 px-2 py-1 rounded text-xs">Actiu</span></td>
-                            </tr>
+                            {users.map(user => (
+                                <tr key={user.id} className="group hover:bg-background-dark/50 transition-colors">
+                                    <td className="px-6 py-4">
+                                        <div className="flex flex-col">
+                                            <span className="text-white font-medium">{user.email}</span>
+                                            <span className="text-xs text-text-secondary font-mono">{user.id}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-4 text-text-secondary">
+                                        {user.createdAt?.toDate ? user.createdAt.toDate().toLocaleDateString() : 'Desconegut'}
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${user.role === 'admin'
+                                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                            : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                            }`}>
+                                            {user.role === 'admin' ? 'ADMINISTRADOR' : 'USUARI'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <div className="flex gap-2 justify-end">
+                                            <button
+                                                onClick={() => toggleRole(user.id, user.role)}
+                                                className="p-2 hover:bg-white/10 rounded-lg text-text-secondary hover:text-white transition-colors"
+                                                title="Canviar Rol"
+                                                disabled={user.id === currentUser.uid}
+                                            >
+                                                <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+                                            </button>
+                                            <button
+                                                onClick={() => deleteUser(user.id)}
+                                                className="p-2 hover:bg-red-500/10 rounded-lg text-text-secondary hover:text-red-400 transition-colors"
+                                                title="Eliminar Usuari"
+                                                disabled={user.id === currentUser.uid}
+                                            >
+                                                <span className="material-symbols-outlined text-[20px]">delete</span>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                            {users.length === 0 && (
+                                <tr>
+                                    <td colSpan="4" className="px-6 py-8 text-center text-text-secondary">
+                                        No s'han trobat usuaris
+                                    </td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
-    )
-}
+    );
+};
 
 const IntegrationsPage = ({ onOpenLeagueManager }) => {
     return (
@@ -1746,29 +2157,33 @@ const App = () => {
 
     return (
         <MemoryRouter>
-            <Routes>
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/dashboard" element={<DashboardPage players={teams.myTeam} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/player" element={<PlayerProfilePage players={teams.myTeam} onUpdatePlayers={(updated) => setTeams({ ...teams, myTeam: updated })} onShowManager={() => setShowManager(true)} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/match-analysis" element={<MatchAnalysisPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/teams" element={<TeamsPage teams={teams} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/integrations" element={<IntegrationsPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/scouting" element={<ScoutingPage teams={teams} events={events} onUpdateEvents={setEvents} onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-                <Route path="/admin" element={<AdminPage onOpenLeagueManager={() => setShowLeagueManager(true)} />} />
-            </Routes>
-            {showManager && (
-                <TeamManager
-                    teams={teams}
-                    onUpdateTeams={setTeams}
-                    onClose={() => setShowManager(false)}
-                />
-            )}
-            {showLeagueManager && (
-                <LeagueManager
-                    leagueId={leagueId}
-                    onClose={() => setShowLeagueManager(false)}
-                />
-            )}
+            <AuthProvider>
+                <Routes>
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="/signup" element={<SignupPage />} />
+                    <Route path="/" element={<LandingPage />} />
+                    <Route path="/dashboard" element={<ProtectedRoute><DashboardPage players={teams.myTeam} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/player" element={<ProtectedRoute><PlayerProfilePage players={teams.myTeam} onUpdatePlayers={(updated) => setTeams({ ...teams, myTeam: updated })} onShowManager={() => setShowManager(true)} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/match-analysis" element={<ProtectedRoute><MatchAnalysisPage onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/teams" element={<ProtectedRoute><TeamsPage teams={teams} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/integrations" element={<ProtectedRoute><IntegrationsPage onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/scouting" element={<ProtectedRoute><ScoutingPage teams={teams} events={events} onUpdateEvents={setEvents} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/admin" element={<ProtectedRoute><AdminPage onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                </Routes>
+                {showManager && (
+                    <TeamManager
+                        teams={teams}
+                        onUpdateTeams={setTeams}
+                        onClose={() => setShowManager(false)}
+                    />
+                )}
+                {showLeagueManager && (
+                    <LeagueManager
+                        leagueId={leagueId}
+                        onClose={() => setShowLeagueManager(false)}
+                    />
+                )}
+            </AuthProvider>
         </MemoryRouter>
     );
 };

@@ -1,16 +1,16 @@
-const { useState, useEffect } = React;
+const { useState, useEffect, useContext } = React;
 const { createRoot } = ReactDOM;
-const { MemoryRouter, Routes, Route, Link, useNavigate, useLocation } = ReactRouterDOM;
+const { HashRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } = ReactRouterDOM;
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
-    apiKey: "AIzaSyD3_ySeudMfXeO3lrJRIPvnqGgyMr8FVf8",
-    authDomain: "chi-analytics-5336b.firebaseapp.com",
-    projectId: "chi-analytics-5336b",
-    storageBucket: "chi-analytics-5336b.firebasestorage.app",
-    messagingSenderId: "900231721396",
-    appId: "1:900231721396:web:04171620f970602a4842e1",
-    measurementId: "G-H6H95H6TT3"
+    apiKey: "AIzaSyBUBTIdO30dXl0no_FqLLhYWiME7khzvz8",
+    authDomain: "chi-analytics-new.firebaseapp.com",
+    projectId: "chi-analytics-new",
+    storageBucket: "chi-analytics-new.firebasestorage.app",
+    messagingSenderId: "335712522840",
+    appId: "1:335712522840:web:da0397ef4fba4e996c302d",
+    measurementId: "G-1W60H2L7PD"
 };
 
 // Initialize Firebase (Compat)
@@ -259,16 +259,21 @@ const AuthProvider = ({ children }) => {
             if (user) {
                 // Get user role from Firestore
                 try {
-                    const userDoc = await db.collection('users').doc(user.uid).get();
-                    if (userDoc.exists) {
-                        setUserRole(userDoc.data().role);
+                    // Safety check: ensure db is available before trying to use it
+                    if (db) {
+                        const userDoc = await db.collection('users').doc(user.uid).get();
+                        if (userDoc.exists) {
+                            setUserRole(userDoc.data().role);
+                        } else {
+                            setUserRole('user');
+                        }
                     } else {
-                        // Create default profile for new google/other signups if we were to adding them
-                        // For email/pass, we handle creation in SignupPage
+                        console.warn("Firestore not initialized, defaulting to user role");
                         setUserRole('user');
                     }
                 } catch (error) {
                     console.error("Error fetching user role:", error);
+                    // Critical fix: don't crash, just default to 'user'role so app can load
                     setUserRole('user');
                 }
             } else {
@@ -303,7 +308,14 @@ const AuthProvider = ({ children }) => {
 
     return (
         <AuthContext.Provider value={value}>
-            {!loading && children}
+            {loading ? (
+                <div className="flex items-center justify-center min-h-screen bg-background-dark text-white">
+                    <div className="flex flex-col items-center gap-4">
+                        <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-xs text-text-secondary uppercase tracking-widest">Iniciant Sessió...</p>
+                    </div>
+                </div>
+            ) : children}
         </AuthContext.Provider>
     );
 };
@@ -522,7 +534,7 @@ const NavButton = ({ to, label, icon }) => {
 };
 
 const MainSidebar = ({ onOpenLeagueManager }) => {
-    const { currentUser, logout } = useAuth();
+    const { currentUser, userRole, logout } = useAuth();
     const navigate = useNavigate();
 
     const handleLogout = async (e) => {
@@ -570,7 +582,9 @@ const MainSidebar = ({ onOpenLeagueManager }) => {
                 )}
             </div>
             <div className="p-4">
-                <NavButton to="/admin" label="Configuració" icon="settings" />
+                {currentUser && userRole === 'admin' && (
+                    <NavButton to="/admin" label="Admin Panel" icon="admin_panel_settings" />
+                )}
 
                 {currentUser && (
                     <div className="hidden lg:block px-3 py-2 mb-2 text-xs text-text-secondary truncate border-t border-white/5 mt-2 pt-4">
@@ -1331,7 +1345,13 @@ const LandingPage = () => {
     );
 };
 
-const DashboardPage = ({ players, onOpenLeagueManager }) => {
+const DashboardPage = ({ players, events = [], onOpenLeagueManager }) => {
+    // Calculate simple stats from events
+    const goals = events.filter(e => e.type === 'GOAL' && e.team === 'myTeam').length;
+    const matchesPlayed = new Set(events.map(e => new Date(e.id).toDateString())).size || 0; // Rough estimate or 0
+    // Mock AI stat for now as we don't have it
+    const aiPrecision = events.length > 0 ? "89%" : "-";
+
     return (
         <div className="flex min-h-screen w-full">
             <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
@@ -1341,22 +1361,8 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                         <h2 className="hidden md:block text-xl text-white font-bold tracking-tight">Panell de Lliga</h2>
                         <div className="relative group">
                             <div className="flex items-center gap-2 bg-[#233648] px-4 py-2 rounded-lg cursor-pointer border border-transparent hover:border-slate-600 transition-colors">
-                                <span className="text-sm font-medium text-white">Liga ASOBAL 23/24</span>
-                                <span className="material-symbols-outlined text-slate-500" style={{ fontSize: '20px' }}>expand_more</span>
+                                <span className="text-sm font-medium text-white">Temporada Actual</span>
                             </div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-4 flex-1 justify-end max-w-2xl">
-                        <div className="hidden md:flex w-full max-w-md items-center bg-[#233648] rounded-lg px-3 py-2.5 focus-within:ring-2 focus-within:ring-primary/50 transition-all">
-                            <span className="material-symbols-outlined text-slate-400 mr-2">search</span>
-                            <input className="bg-transparent border-none text-sm w-full focus:ring-0 text-white placeholder:text-slate-500 p-0" placeholder="Cercar jugadors, equips o estadístiques..." type="text" />
-                        </div>
-                        <button className="relative p-2 text-slate-500 hover:text-primary transition-colors">
-                            <span className="material-symbols-outlined">notifications</span>
-                            <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
-                        </button>
-                        <div className="h-10 w-10 rounded-full bg-slate-700 overflow-hidden border-2 border-slate-600 cursor-pointer">
-                            <img alt="Profile" className="h-full w-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBeCwXn9LLcKxbBl3OBToj-T1YqCGkMbQdNbcyzY7lvmKndE4zgDOqIdxEPmw83Dnfx0oTERQ5C4ovR6EJdb5AxJ45Q0OHE-t3TqcQZa8t1B__ViSNBiF-CgpKAWAixyod36Fbl7fdMBedVeJ8L4SZ87eLqMFJs7-qsBayv-awZsl-lkaeKNB8iONgtDbCx4oDq_57oEYHaqXyRjE6nmjp2HeedhJkPrXSEwKpRFNd5jxJ-j3cgYdlRP8coEjQORxwsH7srTh4GIAkV" />
                         </div>
                     </div>
                 </header>
@@ -1369,14 +1375,13 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                                     <span className="material-symbols-outlined text-6xl text-white">sports_handball</span>
                                 </div>
                                 <div className="flex flex-col gap-1 relative z-10">
-                                    <p className="text-slate-400 text-sm font-medium">Partits Jugats</p>
+                                    <p className="text-slate-400 text-sm font-medium">Gols Totals</p>
                                     <div className="flex items-end gap-3">
-                                        <h3 className="text-3xl font-bold text-white">120</h3>
-                                        <span className="text-emerald-500 text-xs font-bold mb-1.5 px-1.5 py-0.5 bg-emerald-500/10 rounded">+2.1%</span>
+                                        <h3 className="text-3xl font-bold text-white">{goals}</h3>
                                     </div>
                                 </div>
                                 <div className="h-1 w-full bg-slate-800 mt-4 rounded-full overflow-hidden">
-                                    <div className="h-full bg-primary w-[45%] rounded-full"></div>
+                                    <div className="h-full bg-primary w-full rounded-full" style={{ width: `${Math.min(goals, 100)}%` }}></div>
                                 </div>
                             </div>
                             {/* Stat Card 2 */}
@@ -1385,13 +1390,13 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                                     <span className="material-symbols-outlined text-6xl text-white">scoreboard</span>
                                 </div>
                                 <div className="flex flex-col gap-1 relative z-10">
-                                    <p className="text-slate-400 text-sm font-medium">Mitjana Gols/Partit</p>
+                                    <p className="text-slate-400 text-sm font-medium">Events Registrats</p>
                                     <div className="flex items-end gap-3">
-                                        <h3 className="text-3xl font-bold text-white">58.4</h3>
+                                        <h3 className="text-3xl font-bold text-white">{events.length}</h3>
                                     </div>
                                 </div>
                                 <div className="h-1 w-full bg-slate-800 mt-4 rounded-full overflow-hidden">
-                                    <div className="h-full bg-emerald-500 w-[78%] rounded-full"></div>
+                                    <div className="h-full bg-emerald-500 w-full rounded-full" style={{ width: `${Math.min(events.length, 100)}%` }}></div>
                                 </div>
                             </div>
                             {/* Stat Card 3 */}
@@ -1402,7 +1407,7 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                                 <div className="flex flex-col gap-1 relative z-10">
                                     <p className="text-slate-400 text-sm font-medium">Precisió Predicció IA</p>
                                     <div className="flex items-end gap-3">
-                                        <h3 className="text-3xl font-bold text-white">89%</h3>
+                                        <h3 className="text-3xl font-bold text-white">{aiPrecision}</h3>
                                     </div>
                                 </div>
                                 <div className="h-1 w-full bg-slate-800 mt-4 rounded-full overflow-hidden">
@@ -1417,7 +1422,7 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                                 <div className="flex flex-col gap-1 relative z-10">
                                     <p className="text-slate-400 text-sm font-medium">Jugadors Actius</p>
                                     <div className="flex items-end gap-3">
-                                        <h3 className="text-3xl font-bold text-white">{players.length}</h3>
+                                        <h3 className="text-3xl font-bold text-white">{players?.length || 0}</h3>
                                     </div>
                                 </div>
                                 <div className="h-1 w-full bg-slate-800 mt-4 rounded-full overflow-hidden">
@@ -1426,76 +1431,20 @@ const DashboardPage = ({ players, onOpenLeagueManager }) => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                            <div className="xl:col-span-2 bg-card-dark rounded-xl border border-slate-800 shadow-sm flex flex-col">
-                                <div className="p-5 border-b border-slate-800 flex justify-between items-center">
-                                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-primary">leaderboard</span>
-                                        Classificació de la Lliga
-                                    </h3>
-                                </div>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm text-white">
-                                        <thead className="bg-[#151e26] text-slate-500 uppercase tracking-wider text-xs">
-                                            <tr>
-                                                <th className="px-6 py-4 font-semibold w-16 text-center">Pos</th>
-                                                <th className="px-6 py-4 font-semibold">Equip</th>
-                                                <th className="px-6 py-4 font-semibold text-center">Pts</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-800">
-                                            <tr className="hover:bg-[#233648] transition-colors">
-                                                <td className="px-6 py-4 text-center font-bold text-emerald-500">1</td>
-                                                <td className="px-6 py-4 font-medium">Barca</td>
-                                                <td className="px-6 py-4 text-center font-bold text-lg">29</td>
-                                            </tr>
-                                            <tr className="hover:bg-[#233648] transition-colors">
-                                                <td className="px-6 py-4 text-center font-bold text-emerald-500">2</td>
-                                                <td className="px-6 py-4 font-medium">Bidasoa Irun</td>
-                                                <td className="px-6 py-4 text-center font-bold text-lg">24</td>
-                                            </tr>
-                                            <tr className="hover:bg-[#233648] transition-colors">
-                                                <td className="px-6 py-4 text-center font-bold text-emerald-500">3</td>
-                                                <td className="px-6 py-4 font-medium">Granollers</td>
-                                                <td className="px-6 py-4 text-center font-bold text-lg">22</td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                            <div className="bg-card-dark rounded-xl border border-slate-800 shadow-sm flex flex-col p-8 text-center items-center justify-center min-h-[300px]">
+                                <span className="material-symbols-outlined text-6xl text-slate-700 mb-4">leaderboard</span>
+                                <h3 className="text-xl font-bold text-white mb-2">Classificació de la Lliga</h3>
+                                <p className="text-slate-500 max-w-sm">
+                                    Encara no hi ha dades suficients per generar la classificació. Comença a registrar partits!
+                                </p>
                             </div>
-                            <div className="bg-card-dark rounded-xl border border-slate-800 shadow-sm flex flex-col">
-                                <div className="p-5 border-b border-slate-800 flex justify-between items-center">
-                                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                                        <span className="material-symbols-outlined text-purple-500">stars</span>
-                                        Líders PScore
-                                    </h3>
-                                </div>
-                                <div className="p-4 flex flex-col gap-4">
-                                    <Link to="/player" className="flex items-center gap-4 p-3 rounded-lg hover:bg-[#233648] transition-colors border border-transparent hover:border-slate-700">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-200">
-                                            <img className="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAgS_jQthQOnHbRyzdpgpL2oK-tIodHG3FlgzHUUOi5aYnyslYlVV4sKtq-hFpcnvo_TxmPMhh2USnW1U6rRR4qhLZAeqZi1S5zU6Wb63G6Ddg-5olBDRRcZ9Ay8X-noVSoZY_xObFL573c8X06_jLUz8YbED2oCtvj-1A43LWB0gxULCe9ldk-yM2l3cMPaSbtGBZkPKCVlcIBvPabbRbbpcufHB8PtSvTD6DrRH84q_Jkh9UIMY9HcN18ZwjtYr54Z4SsELB5pV_r" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <h4 className="font-bold text-sm text-white">Dika Mem</h4>
-                                            <p className="text-xs text-slate-500">Barca • Lateral Dret</p>
-                                        </div>
-                                        <div className="flex flex-col items-end">
-                                            <span className="text-xl font-bold text-primary">9.8</span>
-                                        </div>
-                                    </Link>
-                                    <Link to="/player" className="flex items-center gap-4 p-3 rounded-lg hover:bg-[#233648] transition-colors border border-transparent hover:border-slate-700">
-                                        <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-200">
-                                            <img className="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAGDCD1qICbvrtCfca2IAHEue9e6Yk7crpSSjqJaB0J9SCFvUHkEXokIJh95jLXDE4gbOCcMKwgdtuBk2g5KuL47n8OMEOg4xSm2beiRIhND8DNu77PZENBvabJJTWO_pCp4kUpqlNDumFIAQYuATy2_Ay2gijfs2fPXFHKbkWeFDm8rWDGkZNfWhq9RHf96dQdN86ZiHzEaiiCGEYn377QtMEUi_r8TTS9n47t54BqFUjW0Tjur6cQ4zp4BmPbFCg6ixIEl9xdTBma" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <h4 className="font-bold text-sm text-white">Aleix Gómez</h4>
-                                            <p className="text-xs text-slate-500">Barca • Extrem Dret</p>
-                                        </div>
-                                        <div className="flex flex-col items-end">
-                                            <span className="text-xl font-bold text-primary">9.4</span>
-                                        </div>
-                                    </Link>
-                                </div>
+                            <div className="bg-card-dark rounded-xl border border-slate-800 shadow-sm flex flex-col p-8 text-center items-center justify-center min-h-[300px]">
+                                <span className="material-symbols-outlined text-6xl text-slate-700 mb-4">stars</span>
+                                <h3 className="text-xl font-bold text-white mb-2">Líders PScore</h3>
+                                <p className="text-slate-500 max-w-sm">
+                                    Els millors jugadors apareixeran aquí mesura que avancis en la temporada.
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -1604,63 +1553,19 @@ const MatchAnalysisPage = ({ onOpenLeagueManager }) => {
     return (
         <div className="flex min-h-screen w-full bg-background-dark text-white font-display overflow-x-hidden">
             <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
-            <div className="flex-1 flex flex-col">
-                <div className="px-6 md:px-10 lg:px-20 py-5">
-                    <div className="flex flex-wrap justify-between items-end gap-3 p-4 border-b border-surface-dark-light/50 pb-6 mb-4">
-                        <div className="flex min-w-72 flex-col gap-3">
-                            <div className="flex items-center gap-3">
-                                <span className="bg-primary/20 text-primary text-xs font-bold px-2 py-1 rounded uppercase tracking-wider">Final</span>
-                                <p className="text-text-secondary text-sm font-normal leading-normal">28 de Maig, 2023 • Colònia, Alemanya</p>
-                            </div>
-                            <h1 className="text-white text-4xl font-black leading-tight tracking-[-0.033em]">Barça <span className="text-primary">32</span> - <span className="text-text-secondary">29</span> Kiel</h1>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 px-4">
-                        <div className="lg:col-span-8 flex flex-col gap-6">
-                            <div className="bg-surface-dark rounded-xl p-1 border border-white/5 relative overflow-hidden group">
-                                <div className="absolute top-4 left-4 z-10 bg-background-dark/80 backdrop-blur-sm px-3 py-1 rounded-full border border-white/10">
-                                    <span className="text-xs font-bold text-white uppercase tracking-wider">Distribució de Tirs</span>
-                                </div>
-                                <div className="bg-[#1a2634] w-full aspect-[4/3] rounded-lg relative overflow-hidden border border-[#2a3a4d]">
-                                    <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#92adc9 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-                                    <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-3/5 h-1/3 bg-[#233648] border-t-2 border-l-2 border-r-2 border-[#92adc9]/40 rounded-t-[100px] z-0"></div>
-                                    <div className="absolute bottom-[40%] left-1/2 -translate-x-1/2 size-24 rounded-full bg-red-500/20 flex items-center justify-center border border-red-500/40 cursor-pointer">
-                                        <span className="text-white font-bold text-xs">45%</span>
-                                    </div>
-                                    <div className="absolute bottom-[35%] right-[20%] size-16 rounded-full bg-primary/30 flex items-center justify-center border border-primary/50 cursor-pointer">
-                                        <span className="text-white font-bold text-xs">22%</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="lg:col-span-4">
-                            <div className="bg-surface-dark rounded-xl border border-white/5 h-full flex flex-col">
-                                <div className="p-5 border-b border-white/5 flex items-center justify-between">
-                                    <h3 className="text-white font-bold text-lg">Rendiment del Jugador</h3>
-                                </div>
-                                <div className="flex-1 overflow-auto">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead className="bg-background-dark sticky top-0 z-10">
-                                            <tr>
-                                                <th className="py-3 px-4 text-xs font-semibold text-text-secondary uppercase tracking-wider">Jugador</th>
-                                                <th className="py-3 px-4 text-xs font-semibold text-text-secondary uppercase tracking-wider text-right">PScore</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-white/5">
-                                            <tr className="group hover:bg-white/5 transition-colors cursor-pointer">
-                                                <td className="py-3 px-4"><span className="text-white font-medium text-sm">Dika Mem</span></td>
-                                                <td className="py-3 px-4 text-right"><span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-bold bg-primary text-white">8.4</span></td>
-                                            </tr>
-                                            <tr className="group hover:bg-white/5 transition-colors cursor-pointer">
-                                                <td className="py-3 px-4"><span className="text-white font-medium text-sm">Aleix Gómez</span></td>
-                                                <td className="py-3 px-4 text-right"><span className="inline-flex items-center justify-center px-2 py-0.5 rounded text-xs font-bold bg-primary/80 text-white">7.9</span></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[80vh]">
+                <div className="bg-surface-dark p-8 rounded-2xl border border-white/5 max-w-lg mb-8">
+                    <span className="material-symbols-outlined text-6xl text-primary mb-4 opacity-50">analytics</span>
+                    <h1 className="text-3xl font-black mb-4">Anàlisi de Partit</h1>
+                    <p className="text-text-secondary mb-6">
+                        Selecciona un partit des del Panell o comença un nou scouting per veure les estadístiques detallades aquí.
+                    </p>
+                    <button
+                        onClick={() => window.location.hash = '#/scouting'}
+                        className="bg-primary hover:bg-primary/90 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-primary/20"
+                    >
+                        COMENÇAR SCOUTING
+                    </button>
                 </div>
             </div>
         </div>
@@ -1671,6 +1576,13 @@ const AdminPage = ({ onOpenLeagueManager }) => {
     const { currentUser, userRole } = useAuth();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [showCreateModal, setShowCreateModal] = useState(false);
+
+    // Create User Form State
+    const [newUserEmail, setNewUserEmail] = useState('');
+    const [newUserPassword, setNewUserPassword] = useState('');
+    const [newUserRole, setNewUserRole] = useState('user');
+    const [createLoading, setCreateLoading] = useState(false);
 
     useEffect(() => {
         const fetchUsers = async () => {
@@ -1722,6 +1634,47 @@ const AdminPage = ({ onOpenLeagueManager }) => {
         }
     };
 
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        setCreateLoading(true);
+
+        // Secondary App Workaround to avoid logging out the admin
+        let secondaryApp = null;
+        try {
+            const secondaryAppName = "secondaryApp-" + Date.now();
+            secondaryApp = firebase.initializeApp(firebaseConfig, secondaryAppName);
+
+            // Create user in Auth
+            const userCredential = await secondaryApp.auth().createUserWithEmailAndPassword(newUserEmail, newUserPassword);
+
+            // Create user in Firestore (using main app's db connection)
+            const newUser = {
+                email: newUserEmail,
+                role: newUserRole,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+
+            await db.collection('users').doc(userCredential.user.uid).set(newUser);
+
+            // Update local state
+            setUsers([{ id: userCredential.user.uid, ...newUser }, ...users]);
+
+            // Cleanup
+            setShowCreateModal(false);
+            setNewUserEmail('');
+            setNewUserPassword('');
+            setNewUserRole('user');
+            alert("Usuari creat correctament!");
+
+        } catch (error) {
+            console.error("Error creating user:", error);
+            alert("Error al crear usuari: " + error.message);
+        } finally {
+            if (secondaryApp) secondaryApp.delete();
+            setCreateLoading(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex min-h-screen w-full bg-background-dark font-display text-white items-center justify-center">
@@ -1757,11 +1710,20 @@ const AdminPage = ({ onOpenLeagueManager }) => {
         <div className="flex min-h-screen w-full bg-background-dark font-display text-white">
             <MainSidebar onOpenLeagueManager={onOpenLeagueManager} />
             <div className="flex-1 flex flex-col p-8 overflow-y-auto">
-                <div className="flex flex-col gap-2 mb-8">
-                    <h1 className="text-white text-3xl md:text-4xl font-bold tracking-tight">Gestió d'Usuaris</h1>
-                    <p className="text-text-secondary text-base font-light">
-                        Administra els usuaris registrats i els seus permisos d'accés.
-                    </p>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                    <div className="flex flex-col gap-2">
+                        <h1 className="text-white text-3xl md:text-4xl font-bold tracking-tight">Gestió d'Usuaris</h1>
+                        <p className="text-text-secondary text-base font-light">
+                            Administra els usuaris registrats i els seus permisos d'accés.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white font-bold py-2.5 px-5 rounded-xl transition-all shadow-lg shadow-primary/20"
+                    >
+                        <span className="material-symbols-outlined">person_add</span>
+                        Nou Usuari
+                    </button>
                 </div>
 
                 <div className="overflow-hidden rounded-xl border border-border-dark bg-surface-dark shadow-sm">
@@ -1826,6 +1788,115 @@ const AdminPage = ({ onOpenLeagueManager }) => {
                         </tbody>
                     </table>
                 </div>
+
+                <div className="mt-12 pt-8 border-t border-red-500/20">
+                    <h2 className="text-red-400 text-xl font-bold mb-4 flex items-center gap-2">
+                        <span className="material-symbols-outlined">warning</span>
+                        Zona de Perill
+                    </h2>
+                    <div className="bg-red-500/5 border border-red-500/10 rounded-xl p-6 flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div>
+                            <h3 className="text-white font-bold mb-1">Esborrar Totes les Dades</h3>
+                            <p className="text-text-secondary text-sm">
+                                Aquesta acció eliminarà tots els equips, jugadors i events registrats en aquesta sessió.
+                                <br />
+                                <span className="font-mono text-xs opacity-70">Session ID: {localStorage.getItem('chi_analytics_session_id')}</span>
+                            </p>
+                        </div>
+                        <button
+                            onClick={async () => {
+                                if (confirm("ESTÀS SEGUR? Això esborrarà TOTES les dades de l'equip i events actuals. No es pot desfer.")) {
+                                    try {
+                                        const sessionId = localStorage.getItem('chi_analytics_session_id');
+                                        if (sessionId) {
+                                            await db.collection('teams').doc(sessionId).delete();
+                                            await db.collection('events').doc(sessionId).delete();
+                                            // Optional: reload to refresh app state
+                                            window.location.reload();
+                                        }
+                                    } catch (e) {
+                                        alert("Error: " + e.message);
+                                    }
+                                }
+                            }}
+                            className="bg-red-500 hover:bg-red-600 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-lg shadow-red-500/20 whitespace-nowrap"
+                        >
+                            RESET DATABASE
+                        </button>
+                    </div>
+                </div>
+
+
+
+                {/* Create User Modal */}
+                {
+                    showCreateModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                            <div className="bg-surface-dark border border-border-dark w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+                                <div className="p-6 border-b border-white/5 flex justify-between items-center bg-background-dark/50">
+                                    <h2 className="text-xl font-bold text-white">Nou Usuari</h2>
+                                    <button onClick={() => setShowCreateModal(false)} className="text-text-secondary hover:text-white">
+                                        <span className="material-symbols-outlined">close</span>
+                                    </button>
+                                </div>
+                                <form onSubmit={handleCreateUser} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Email</label>
+                                        <input
+                                            type="email"
+                                            required
+                                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                                            value={newUserEmail}
+                                            onChange={(e) => setNewUserEmail(e.target.value)}
+                                            placeholder="usuari@exemple.com"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Contrasenya</label>
+                                        <input
+                                            type="password"
+                                            required
+                                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                                            value={newUserPassword}
+                                            onChange={(e) => setNewUserPassword(e.target.value)}
+                                            placeholder="Mínim 6 caràcters"
+                                            minLength={6}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-text-secondary uppercase tracking-widest mb-2">Rol Inicial</label>
+                                        <select
+                                            className="w-full bg-background-dark border border-border-dark rounded-xl px-4 py-3 text-white outline-none focus:ring-2 focus:ring-primary/50"
+                                            value={newUserRole}
+                                            onChange={(e) => setNewUserRole(e.target.value)}
+                                        >
+                                            <option value="user">Usuari (Estàndard)</option>
+                                            <option value="admin">Administrador (Total)</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="pt-4 flex gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowCreateModal(false)}
+                                            className="flex-1 bg-white/5 hover:bg-white/10 text-white font-bold py-3 rounded-xl transition-all"
+                                        >
+                                            Cancel·lar
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={createLoading}
+                                            className="flex-1 bg-primary hover:bg-primary/90 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                                        >
+                                            {createLoading && <span className="material-symbols-outlined animate-spin text-sm">sync</span>}
+                                            Crear Usuari
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )
+                }
             </div>
         </div>
     );
@@ -2156,13 +2227,13 @@ const App = () => {
     }
 
     return (
-        <MemoryRouter>
+        <HashRouter>
             <AuthProvider>
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/signup" element={<SignupPage />} />
                     <Route path="/" element={<LandingPage />} />
-                    <Route path="/dashboard" element={<ProtectedRoute><DashboardPage players={teams.myTeam} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
+                    <Route path="/dashboard" element={<ProtectedRoute><DashboardPage players={teams.myTeam} events={events} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
                     <Route path="/player" element={<ProtectedRoute><PlayerProfilePage players={teams.myTeam} onUpdatePlayers={(updated) => setTeams({ ...teams, myTeam: updated })} onShowManager={() => setShowManager(true)} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
                     <Route path="/match-analysis" element={<ProtectedRoute><MatchAnalysisPage onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
                     <Route path="/teams" element={<ProtectedRoute><TeamsPage teams={teams} onOpenLeagueManager={() => setShowLeagueManager(true)} /></ProtectedRoute>} />
@@ -2184,7 +2255,7 @@ const App = () => {
                     />
                 )}
             </AuthProvider>
-        </MemoryRouter>
+        </HashRouter>
     );
 };
 
